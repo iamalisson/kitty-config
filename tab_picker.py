@@ -175,7 +175,7 @@ def handle_result(args, answer, target_window_id, boss):
                 boss.set_active_tab(tab)
                 break
     elif kind == 'open':
-        w = boss.active_window
+        w = boss.window_id_map.get(target_window_id) or boss.active_window
         if w:
             w.write_to_child(f'cd {shlex.quote(value)}\n')
 
