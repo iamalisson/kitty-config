@@ -46,6 +46,7 @@ Reload with `ctrl+shift+F5`, or just restart kitty.
 | `ctrl+shift+space`     | New window (inherits cwd) — fcitx5 fallback |
 | `ctrl+shift+z`         | Toggle stack layout                     |
 | `ctrl+shift+p`         | Fuzzy-jump to a tab (`tab_picker.py`)   |
+| `ctrl+r` (inside picker) | Toggle history mode — reopen a closed tab's dir as a new tab |
 
 ---
 
@@ -56,7 +57,8 @@ Reload with `ctrl+shift+F5`, or just restart kitty.
 | `kitty.conf`        | Main config — font, cursor, layout, keybindings, wallpaper            |
 | `theme.conf`        | Nord color theme (full Frost + Aurora palette)                        |
 | `session.conf`      | Fullscreen-on-launch state, no windows/layout (avoids restore bugs)   |
-| `tab_picker.py`     | Fuzzy tab switcher kitten — type part of a cwd or title, Enter jumps  |
+| `tab_picker.py`     | Fuzzy tab switcher kitten — type part of a cwd or title, Enter jumps; `ctrl+r` reopens a closed tab's dir |
+| `dir_history.py`    | Watcher — logs each closed window's cwd to `~/.cache/kitty/dir_history.txt` for the picker's history mode |
 | `wallpaper.png`     | Background artwork, tinted to match the Nord palette                  |
 
 ---
