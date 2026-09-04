@@ -1,11 +1,12 @@
 #!/usr/bin/env python
 # Fuzzy tab switcher: type part of a tab's cwd/path or title, Enter jumps there.
 # ctrl+r toggles history mode: pick a dir from a closed tab/window (logged by
-# dir_history.py) and it opens as a new tab there.
+# dir_history.py) and cds the current window there.
 # Modeled on kitty's own bundled resize_window/broadcast kittens (Handler + Loop).
 
 import json
 import os
+import shlex
 import subprocess
 import sys
 
@@ -174,7 +175,9 @@ def handle_result(args, answer, target_window_id, boss):
                 boss.set_active_tab(tab)
                 break
     elif kind == 'open':
-        subprocess.run(['kitty', '@', 'launch', '--type=tab', '--cwd', value])
+        w = boss.active_window
+        if w:
+            w.write_to_child(f'cd {shlex.quote(value)}\n')
 
 
 if __name__ == '__main__':
