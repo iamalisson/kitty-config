@@ -1,7 +1,10 @@
 #!/usr/bin/env python
 # Fuzzy tab switcher: type part of a tab's cwd/path or title, Enter jumps there.
 # ctrl+r toggles history mode: pick a dir from a closed tab/window (logged by
-# dir_history.py) and cds the current window there.
+# dir_history.py) and cds the current window there. Pass `history` as the
+# first arg to open straight in history mode.
+# Query is split on spaces; every word must appear (any order, case-insensitive).
+# The list scrolls with the selection, so long histories stay reachable.
 # Modeled on kitty's own bundled resize_window/broadcast kittens (Handler + Loop).
 
 import json
@@ -17,6 +20,10 @@ from kittens.tui.loop import Loop
 from kittens.tui.operations import styled
 
 HISTORY_FILE = os.path.expanduser('~/.cache/kitty/dir_history.txt')
+HOME = os.path.expanduser('~')
+# Title, query and blank line above the list; status line below it.
+HEADER_ROWS = 3
+FOOTER_ROWS = 1
 
 
 def get_history():
@@ -28,7 +35,7 @@ def get_history():
     seen = set()
     out = []
     for path in reversed(lines):
-        if path not in seen:
+        if path not in seen and os.path.isdir(path):
             seen.add(path)
             out.append(path)
     return out
@@ -60,67 +67,134 @@ def get_tabs():
     return tabs, None
 
 
+def tilde(path):
+    if path == HOME or path.startswith(HOME + '/'):
+        return '~' + path[len(HOME):]
+    return path
+
+
+def clip(text, width):
+    if width <= 0:
+        return ''
+    return text if len(text) <= width else text[:max(width - 1, 0)] + '…'
+
+
+def matches_all(words, haystacks):
+    hay = '\n'.join(haystacks).lower()
+    return all(w in hay for w in words)
+
+
 class Picker(Handler):
 
-    def __init__(self, tabs, error):
+    def __init__(self, tabs, error, show_history=False):
         self.tabs = tabs
         self.error = error
         self.history = get_history()
-        self.show_history = False
+        self.show_history = show_history
         self.query = LineEdit()
         self.selected = 0
+        self.offset = 0
         self.result = ''
 
     def initialize(self):
         self.cmd.set_cursor_visible(False)
         self.draw_screen()
 
+    def on_resize(self, new_size):
+        super().on_resize(new_size)
+        self.draw_screen()
+
     def matches(self):
-        q = self.query.current_input.lower()
+        words = self.query.current_input.lower().split()
         if self.show_history:
-            if not q:
+            if not words:
                 return self.history
-            return [p for p in self.history if q in p.lower()]
-        if not q:
+            hits = [p for p in self.history if matches_all(words, [p, tilde(p)])]
+            # Dirs whose own name matches the last word come first, keeping recency order otherwise.
+            last = words[-1]
+            return sorted(hits, key=lambda p: last not in os.path.basename(p).lower())
+        if not words:
             return self.tabs
-        out = []
-        for t in self.tabs:
-            haystacks = [t['cwd'], t['title']] + t['window_cwds'] + t['window_titles']
-            if any(q in h.lower() for h in haystacks):
-                out.append(t)
-        return out
+        return [t for t in self.tabs
+                if matches_all(words, [t['cwd'], t['title']] + t['window_cwds'] + t['window_titles'])]
+
+    def visible_rows(self):
+        return max(1, self.screen_size.rows - HEADER_ROWS - FOOTER_ROWS)
+
+    def clamp(self, count):
+        self.selected = max(0, min(self.selected, count - 1))
+        rows = self.visible_rows()
+        if self.selected < self.offset:
+            self.offset = self.selected
+        elif self.selected >= self.offset + rows:
+            self.offset = self.selected - rows + 1
+        self.offset = max(0, min(self.offset, max(count - rows, 0)))
 
     def draw_screen(self):
         items = self.matches()
-        self.selected = max(0, min(self.selected, len(items) - 1))
+        self.clamp(len(items))
+        cols = self.screen_size.cols
         self.cmd.clear_screen()
         p = self.print
         title = 'Reopen a directory' if self.show_history else 'Switch to tab'
         p(styled(title, bold=True), ' (', styled('Esc', italic=True), ' cancel, ',
           styled('ctrl+r', italic=True), ' toggle history)')
-        p('> ' + self.query.current_input)
+        p('> ' + self.query.current_input + styled(' ', reverse=True))
         p()
+        rows = self.visible_rows()
+        window = items[self.offset:self.offset + rows]
         if self.show_history:
-            if not items:
-                p(styled('  no history yet (closes a tab/window to log its cwd)', fg='red'))
-            for i, path in enumerate(items):
-                p(styled('> ' + path, reverse=True) if i == self.selected else '  ' + path)
-            return
-        if self.error:
-            p(styled('  kitty @ ls failed: ' + self.error, fg='red'))
-            p(styled('  (remote control needs a kitty restart to take effect)', fg='gray', fg_intense=True))
-        elif not items:
-            p(styled('  no match', fg='red'))
-        for i, t in enumerate(items):
-            others = ' · '.join(c for c in t['window_cwds'] if c and c != t['cwd'])
-            line = f"{t['cwd']}  {styled(t['title'], fg='gray', fg_intense=True)}"
-            if others:
-                line += '  ' + styled('[+ ' + others + ']', fg='blue', fg_intense=True)
-            p(styled('> ' + line, reverse=True) if i == self.selected else '  ' + line)
+            if not self.history:
+                p(styled('  no history yet (cd somewhere or close a window to log its cwd)', fg='red'))
+            elif not items:
+                p(styled('  no match', fg='red'))
+            for i, path in enumerate(window, self.offset):
+                line = clip(tilde(path), cols - 2)
+                p(styled('> ' + line, reverse=True) if i == self.selected else '  ' + line)
+        else:
+            if self.error:
+                p(styled('  kitty @ ls failed: ' + self.error, fg='red'))
+                p(styled('  (remote control needs a kitty restart to take effect)', fg='gray', fg_intense=True))
+            elif not items:
+                p(styled('  no match', fg='red'))
+            for i, t in enumerate(window, self.offset):
+                cwd = clip(tilde(t['cwd']), cols - 2)
+                room = cols - 2 - len(cwd) - 2
+                tab_title = clip(t['title'], room)
+                room -= len(tab_title) + 2
+                others = ' · '.join(tilde(c) for c in t['window_cwds'] if c and c != t['cwd'])
+                others = clip('[+ ' + others + ']', room) if others and room > 4 else ''
+                if i == self.selected:
+                    line = '  '.join(x for x in (cwd, tab_title, others) if x)
+                    p(styled('> ' + line, reverse=True))
+                    continue
+                line = cwd
+                if tab_title:
+                    line += '  ' + styled(tab_title, fg='gray', fg_intense=True)
+                if others:
+                    line += '  ' + styled(others, fg='blue', fg_intense=True)
+                p('  ' + line)
+        if items:
+            shown_to = min(self.offset + rows, len(items))
+            status = f'{self.selected + 1}/{len(items)}'
+            if len(items) > rows:
+                status += f'  (showing {self.offset + 1}-{shown_to}, ↑↓ / PgUp PgDn to scroll)'
+            self.cmd.set_cursor_position(0, self.screen_size.rows - 1)
+            self.write(styled(clip(status, cols), fg='gray', fg_intense=True))
 
     def on_text(self, text, in_bracketed_paste=False):
         self.query.on_text(text, in_bracketed_paste)
-        self.selected = 0
+        self.selected = self.offset = 0
+        self.draw_screen()
+
+    def move(self, delta, wrap=True):
+        count = len(self.matches())
+        if not count:
+            return
+        target = self.selected + delta
+        if wrap and abs(delta) == 1:
+            target %= count
+        self.selected = max(0, min(target, count - 1))
         self.draw_screen()
 
     def on_key(self, key_event):
@@ -139,26 +213,26 @@ class Picker(Handler):
             return
         if key_event.matches('ctrl+r'):
             self.show_history = not self.show_history
-            self.selected = 0
+            self.selected = self.offset = 0
             self.draw_screen()
             return
-        if key_event.matches('down') or key_event.matches('ctrl+n'):
-            self.selected += 1
-            self.draw_screen()
-            return
-        if key_event.matches('up') or key_event.matches('ctrl+p'):
-            self.selected -= 1
-            self.draw_screen()
-            return
+        if key_event.matches('down') or key_event.matches('ctrl+n') or key_event.matches('ctrl+j'):
+            return self.move(1)
+        if key_event.matches('up') or key_event.matches('ctrl+p') or key_event.matches('ctrl+k'):
+            return self.move(-1)
+        if key_event.matches('page_down'):
+            return self.move(self.visible_rows(), wrap=False)
+        if key_event.matches('page_up'):
+            return self.move(-self.visible_rows(), wrap=False)
         if self.query.on_key(key_event):
-            self.selected = 0
+            self.selected = self.offset = 0
             self.draw_screen()
 
 
 def main(args):
     tabs, error = get_tabs()
     loop = Loop()
-    handler = Picker(tabs, error)
+    handler = Picker(tabs, error, show_history='history' in args[1:])
     loop.loop(handler)
     return handler.result
 

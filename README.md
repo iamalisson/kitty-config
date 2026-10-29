@@ -46,7 +46,9 @@ Reload with `ctrl+shift+F5`, or just restart kitty.
 | `ctrl+shift+space`     | New window (inherits cwd) — fcitx5 fallback |
 | `ctrl+shift+z`         | Toggle stack layout                     |
 | `ctrl+shift+p`         | Fuzzy-jump to a tab (`tab_picker.py`)   |
-| `ctrl+r` (inside picker) | Toggle history mode — reopen a closed tab's dir as a new tab |
+| `ctrl+shift+d`         | Open the picker straight in dir-history mode |
+| `ctrl+r` (inside picker) | Toggle history mode — cd the current window to a dir you had open |
+| `↑↓` / `PgUp PgDn` (inside picker) | Move / scroll; type words (any order) to filter, `Enter` picks |
 
 ---
 
@@ -79,7 +81,7 @@ kitty/
 ## Layout & Behavior
 
 - `enabled_layouts splits,stack,tall,grid` — dynamic tiling, splits first
-- Every "open something new" shortcut inherits the current window's cwd
+- Every "open something new" shortcut inherits the cwd last reported via OSC 7 (shell prompt, or nvim's project root)
 - Background wallpaper scaled and tinted to blend into the Nord background
 - `startup_session session.conf` only sets `os_window_state fullscreen` — deliberately carries no window/tab entries, so it can't resurrect stale layouts
 
